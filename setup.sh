@@ -1,3 +1,5 @@
+set -e
+
 sudo mkdir /mydata/Oasis
 sudo chown $USER /mydata/Oasis
 
@@ -7,7 +9,7 @@ git clone git@github.com:raghav-rangan/Oasis.git
 mkdir /mydata/Oasis/miniconda
 cd /mydata/Oasis/miniconda
 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-./Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
 
 conda create --name oasis python=3.9
 conda activate oasis
