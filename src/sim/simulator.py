@@ -227,6 +227,7 @@ class Simulator:
                 end_job_time = self.run_end(second_job.job_id)
                 return True, end_job_time
 
+    # the return value for this is one sample
     def run_group_dependency(self, groups, infer_func, train_freq=300, infer_freq=1, sample_time_step=144,
                              sample_time_length=600, step=1, train_func=None, mini_batch_size=128,
                              max_store_reward=1, infer_lower_bound=-5.0, infer_upper_bound=500, early_age=False,
@@ -354,6 +355,7 @@ class Simulator:
                                 "Simulator Time: {}, Successor job submission (Pred: {}, Succ: {})".format(self._time,
                                                                                                            pred_job.job_id,
                                                                                                            next_job.job_id))
+
                     else:
                         if pred_job.log is None:
                             p_wait = (self._time - pred_job.submit).total_seconds()

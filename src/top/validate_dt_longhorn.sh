@@ -1,0 +1,1 @@
+python3 online_validate.py -num_validate 156 -interval 4 -workload longhorn-v100.log -workload_len 5 -start_time 2021-01-26T00:00:00 -od /mydata/Mirage/experiment/longhorn_validate_decision_transformer/result -m /mydata/Mirage/decision_transformer/longhorn_checkpoints/checkpoint_50.cpt -warmup_len 2 -sample_window 144 -mt decision_transformer -node 1 -parallel

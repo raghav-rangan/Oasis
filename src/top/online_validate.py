@@ -5,6 +5,7 @@ import argparse
 import os
 import sys
 from torch.distributions import Categorical
+from transformers import DecisionTransformerModel
 
 PROJECT_ROOT = os.path.abspath(os.path.join(
     os.path.dirname(__file__),
@@ -19,6 +20,7 @@ from quantile import quantile
 from moe.model import TransformerRegressor
 
 
+#@ray.remote(num_gpus=1/4)
 @ray.remote
 def simulate(interval, loop, infer_wrapper, slurm_cfg, backfill_cfg, workload, start_time, warmup_len, workload_len,
              regr_model, sample_window, infer_low_bound, num_node=1):
@@ -61,7 +63,7 @@ def simulate(interval, loop, infer_wrapper, slurm_cfg, backfill_cfg, workload, s
 
 
 def simulate_serial(interval, loop, infer_wrapper, slurm_cfg, backfill_cfg, workload, start_time, warmup_len,
-                    workload_len, regr_model, sample_window):
+                    workload_len, regr_model, sample_window, infer_lower_bound=-0.5):
     # ---------------------------------------------------------------------------------------------------------------
     # Simulator Initialization
     # logging.basicConfig(format='%(asctime)s - %(levelname)s: %(message)s', level=logging.INFO)
@@ -97,7 +99,7 @@ def simulate_serial(interval, loop, infer_wrapper, slurm_cfg, backfill_cfg, work
         sample_time_length=600,
         infer_freq=60,
         sample_time_step=sample_window,
-        infer_lower_bound=-0.5)
+        infer_lower_bound=infer_lower_bound)
     return slurm_simulator.reward(), slurm_simulator.prediction_trace, loop, infer_bound_pending_jobs, infer_bound_running_logs, infer_bound_nodes
 
 
@@ -133,7 +135,47 @@ def main():
 
     # ---------------------------------------------------------------------------------------------------------------
     # Simulation Initialization
-    if args.model_type == "moe" or args.model_type == "policy-gradient":
+    if args.model_type == "decision_transformer":
+        # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cpu")
+        model_dt = DecisionTransformerModel.from_pretrained(args.model).to(device)
+        model_dt.eval()
+        
+        def infer_wrapper_dt(metadata, data_input):
+            # force a submission if we reached the end of the job
+            if data_input[0][0][2][3] == 172800.0:
+                return 1.0
+            np_ndarray_input = raw_features_to_np_ndarray(data_input, parallel=False)
+            tensor_input = torch.from_numpy(np_ndarray_input)
+
+            # tensor input is 144 x 42
+            # states should be 1 x 144 x 42
+            states = tensor_input.clone().float().to(device)
+            actions = torch.full((1, states.shape[1], 1), -1, dtype=torch.float32).to(device)
+            rewards = torch.full((1, states.shape[1], 1), 0.0, dtype=torch.float32).to(device)
+            returns_to_go = rewards.clone()
+            timesteps = torch.arange(0, states.shape[1], dtype=torch.int32).unsqueeze(0).to(device)
+
+            attention_mask = torch.full((1, states.shape[1]), 1).to(device)
+            attention_mask[:, -1] = 0
+
+            state_preds, action_preds, reward_preds = model_dt(
+                states=states,
+                actions=actions,
+                rewards=rewards,
+                returns_to_go=returns_to_go,
+                timesteps=timesteps,
+                attention_mask=attention_mask,
+                return_dict=False
+            )
+            # if action_preds[0,-1].item() >= 0:
+                # print("active submission")
+            # print(data_input[0][0][2][3], action_preds[0,-1].item())
+            return action_preds[0, -1].item()
+        infer_wrapper = infer_wrapper_dt
+        infer_low_bound = 0.0
+
+    elif args.model_type == "moe" or args.model_type == "policy-gradient":
         checkpoint = torch.load(args.model, map_location=torch.device("cpu"))
 
         model_name = checkpoint['model_name']
@@ -240,7 +282,8 @@ def main():
         file = os.listdir("../workload")
         file = list(filter(lambda x: x != args.workload_name, file))
         file = list(map(lambda x: "/workload/" + x, file))
-        ray.init(runtime_env={"py_modules": [sim], "working_dir": "../",
+        import moe
+        ray.init(runtime_env={"py_modules": [sim, moe], "working_dir": "../",
                               "excludes": ["/test/", "/data/", "/misc/"] + file})
 
         for i in range(0, args.num_validate):
@@ -281,7 +324,7 @@ def main():
                                                                                 args.warmup_len,
                                                                                 args.workload_len,
                                                                                 regr,
-                                                                                args.sample_window)
+                                                                                args.sample_window, infer_lower_bound=infer_low_bound)
             total_reward[i] = reward
             prediction_trace_data[i] = pred_trace
             run_logs = sorted(run_logs, key=lambda x: x.job.submit)

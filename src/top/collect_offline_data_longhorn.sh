@@ -1,0 +1,1 @@
+python3 offline_data_gen.py -num_samples 684 -num_probe 26 -interval 4 -od /mydata/Mirage/src/data/longhorn/train_data_large -workload longhorn-v100.log -start_time 2019-11-05T00:00:00 -warmup_len 2 -workload_len 5 -node 1 -baseline default -parallel

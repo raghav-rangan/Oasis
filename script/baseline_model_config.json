@@ -5,5 +5,8 @@
   },
   "RandomForest":{
     "n_estimators": 100
+  },
+  "XGBRegression": {
+
   }
 }

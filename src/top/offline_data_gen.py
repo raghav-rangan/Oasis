@@ -103,6 +103,7 @@ def simulate_per_thread(init_time, i, slurm_config, backfill_config, num_probe, 
     simulator_start_time = init_time + timedelta(hours=i * start_time_interval)
     workload_start_time = simulator_start_time
     workload_end_time = workload_start_time + timedelta(days=workload_len)
+    # is this pre-simulate put into the output?
     lower_bound, upper_bound, avg_time, waiting_queue_size = pre_simulate(simulator_start_time, workload_start_time,
                                                                           workload_end_time,
                                                                           slurm_config, backfill_config, workload_path,
@@ -126,9 +127,11 @@ def simulate_per_thread(init_time, i, slurm_config, backfill_config, num_probe, 
                 pred_value = 2880
             sample_point = [upper_bound - timedelta(minutes=pred_value)]
     else:
-        interval = (upper_bound - lower_bound).total_seconds() / (num_probe - 1.0)
+        interval = round((upper_bound - lower_bound).total_seconds() / (num_probe - 1.0))
         sample_point = [(lower_bound + timedelta(seconds=interval * j)).replace(second=0) for j in range(0, num_probe)]
+    # how many sample points are there
     for point in sample_point:
+        # what is simulate_per_sample returning, this seems to be the data
         data.append(
             simulate_per_sample(point, simulator_start_time, workload_start_time, workload_end_time,
                                 slurm_config, backfill_config, workload_path, warmup_len, regr_model, early_age,
@@ -162,7 +165,7 @@ def simulate_single(init_time, i, slurm_config, backfill_config, num_probe, star
             pred_value = int(quantile_model.predict(test)[0] * 60)
             sample_point = [upper_bound - timedelta(minutes=pred_value)]
     else:
-        interval = (upper_bound - lower_bound).total_seconds() / (num_probe - 1.0)
+        interval = round((upper_bound - lower_bound).total_seconds() / (num_probe - 1.0))
         sample_point = [(lower_bound + timedelta(seconds=interval * j)).replace(second=0) for j in range(0, num_probe)]
     for point in sample_point:
         data.append(
@@ -212,6 +215,7 @@ def simulate(num_probe, start_time_interval, parallel, num_sample_all, workload_
             sample_avg[i] = avg
         print("-----------------------")
     else:
+        # this is not parallel: the configuration we are running
         file = os.listdir("../workload")
         file = list(filter(lambda x: x != workload_name, file))
         file = list(map(lambda x: "/workload/" + x, file))
@@ -241,8 +245,10 @@ def simulate(num_probe, start_time_interval, parallel, num_sample_all, workload_
         total_finish_time = timedelta(seconds=0)
         while len(rpc):
             wait_time = datetime.today()
+            # returns the list of finished jobs (just get 1 by default), the list of remaining jobs
             done_id, rpc = ray.wait(rpc)
             finish_count += 1
+            # get the first one that's done
             res = ray.get(done_id[0])
             # Only one group of dependency job
             sample_data[res[2]] = res[0]

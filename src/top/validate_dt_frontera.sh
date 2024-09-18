@@ -1,0 +1,1 @@
+python3 online_validate.py -num_validate 156 -interval 4 -workload frontera-rtx.log -workload_len 5 -start_time 2020-08-18T00:00:00 -od /mydata/Mirage/experiment/frontera_validate_decision_transformer/result -m /mydata/Mirage/decision_transformer/frontera_checkpoints/checkpoint_70.cpt -warmup_len 2 -sample_window 144 -mt decision_transformer -node 1 -parallel

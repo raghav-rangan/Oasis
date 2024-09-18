@@ -1,0 +1,1 @@
+python3 online_validate.py -num_validate 156 -interval 4 -workload ls6-a100.log -workload_len 5 -start_time 2023-03-01T00:00:00 -od /mydata/Mirage/experiment/ls6_validate_decision_transformer/dup_result -m /mydata/Mirage/decision_transformer/ls6_checkpoints/checkpoint_50.cpt -warmup_len 2 -sample_window 144 -mt decision_transformer -node 1 -parallel

@@ -28,6 +28,12 @@ def main():
     n_reward = n_reward.numpy()
     x_train, x_test, y_train, y_test = train_test_split(n_feature, n_reward, test_size=0.2, random_state=42)
 
+    print(x_train.shape)
+    print(x_test.shape)
+    print(y_train.shape)
+    print(y_test.shape)
+    print(y_test)
+
     if args.model == "QuantileRegression":
         model = QuantileRegressor(**config["QuantileRegression"])
     elif args.model == "RandomForest":

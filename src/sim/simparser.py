@@ -32,11 +32,11 @@ class SimParser:
         with open(log) as f:
             content = f.read()
         job_log = content.split("\n")
-        index_lst = list(filter(lambda x: x != "", job_log[0].split(" ")))
+        index_lst = list(filter(lambda x: x != "", job_log[0].split()))
         index_dict = dict(zip(index_lst, [i for i in range(0, len(index_lst))]))
         job_dict = {}
-        for row in job_log[2:-1]:
-            job_info = list(filter(lambda x: x != "", row.split(" ")))
+        for row in job_log[1:-1]:
+            job_info = list(filter(lambda x: x != "", row.split()))
             start_time = datetime.strptime(job_info[index_dict["Start"]], "%Y-%m-%dT%H:%M:%S")
             end_time = datetime.strptime(job_info[index_dict["End"]], "%Y-%m-%dT%H:%M:%S")
             submit_time = datetime.strptime(job_info[index_dict["Submit"]], "%Y-%m-%dT%H:%M:%S")
