@@ -74,12 +74,15 @@ if __name__ == '__main__':
             samples = pickle.load(data)
         raw_input = []
         raw_target = []
+        raw_execution = []
         samples = samples[:]
         for s in samples:
             if (s is not None):
-                f, r = s
+                f, r, e = s
+                print(e)
                 raw_input.append(f)
                 raw_target.append(r)
+                raw_execution.append(e)
 
         if (PARALLEL_PREPROCESSING):
             try:
@@ -96,19 +99,23 @@ if __name__ == '__main__':
             np_ndarray_input = raw_features_to_np_ndarray(raw_input, parallel=False)
 
         np_ndarray_target = np.array(raw_target)
+        np_ndarray_execution = np.array(raw_execution)
+        print(np_ndarray_input.shape, np_ndarray_target.shape, np_ndarray_execution.shape)
         tensor_input = torch.from_numpy(np_ndarray_input)
         tensor_target = torch.from_numpy(np_ndarray_target)
         tensor_target = tensor_target.reshape((tensor_target.shape[0], 1))
         tensor_target = tensor_target / 3600
+        tensor_execution = torch.from_numpy(np_ndarray_execution)
+        tensor_execution = tensor_execution.reshape((tensor_execution.shape[0], 1))
 
-        tensor_cache = (tensor_input, tensor_target)
+        tensor_cache = (tensor_input, tensor_target, tensor_execution)
         with open(os.path.join(args.work_dir, 'data', fname_data_tensor), 'wb') as output:
             pickle.dump(tensor_cache, output)
             print(f'{len(tensor_input)} tensorized samples are cached on local storage...')
 
     else:
         with open(os.path.join(args.work_dir, 'data', fname_data_tensor), 'rb') as data:
-            tensor_input, tensor_target = pickle.load(data)
+            tensor_input, tensor_target, _ = pickle.load(data)
             print(f'{len(tensor_input)} tensorized samples are loaded on local cache...')
 
     data_size = tensor_input.shape[0]

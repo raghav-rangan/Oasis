@@ -138,6 +138,12 @@ def main():
     if args.model_type == "decision_transformer":
         # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         device = torch.device("cpu")
+
+        model_dir = os.path.dirname(args.model)
+        model_base = os.path.basename(args.model)
+        metadata_file = os.path.join(model_dir, f"metadata_{model_base.split('_')[-1][:-3]}pt")
+        metadata_stuff = torch.load(metadata_file, map_location=device)
+
         model_dt = DecisionTransformerModel.from_pretrained(args.model).to(device)
         model_dt.eval()
         
@@ -151,7 +157,7 @@ def main():
             # tensor input is 144 x 42
             # states should be 1 x 144 x 42
             states = tensor_input.clone().float().to(device)
-            actions = torch.full((1, states.shape[1], 1), -1, dtype=torch.float32).to(device)
+            actions = torch.full((1, states.shape[1], 2), -1, dtype=torch.float32).to(device)
             rewards = torch.full((1, states.shape[1], 1), 0.0, dtype=torch.float32).to(device)
             returns_to_go = rewards.clone()
             timesteps = torch.arange(0, states.shape[1], dtype=torch.int32).unsqueeze(0).to(device)
@@ -171,7 +177,8 @@ def main():
             # if action_preds[0,-1].item() >= 0:
                 # print("active submission")
             # print(data_input[0][0][2][3], action_preds[0,-1].item())
-            return action_preds[0, -1].item()
+            execution_max = metadata_stuff['norm_factor']
+            return action_preds[0, -1, 0].item(), action_preds[0, -1, 1].item() * execution_max
         infer_wrapper = infer_wrapper_dt
         infer_low_bound = 0.0
 
@@ -355,10 +362,13 @@ def main():
     with open(os.path.join(args.output_dir, "reward.log"), "w") as f:
         f.write(
             "------------------------------------------Reward Logs-------------------------------------------------\n")
-        f.write("pred_job_id,succ_job_id,expected_reward,actual_reward,reward_gen_time,index,backfill,submission\n")
+        f.write("pred_job_id,succ_job_id,expected_reward,actual_reward,reward_gen_time,index,backfill,submission,predicted_time,actual_exec_time\n")
         for key, value in total_reward.items():
             if value is None:
                 f.write("None\n")
+            if len(value) > 7:
+                f.write(
+                    f"{value[0][0]},{value[0][1]},{value[0][2]},{value[0][3]},{value[0][4]},{key},{value[0][5]},{value[0][6]},{value[0][7]},{value[0][8]}\n")
             else:
                 f.write(
                     f"{value[0][0]},{value[0][1]},{value[0][2]},{value[0][3]},{value[0][4]},{key},{value[0][5]},{value[0][6]}\n")

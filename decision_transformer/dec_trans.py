@@ -9,10 +9,11 @@ import numpy as np
 import sys
 
 class DecisionTransformerData(Dataset):
-    def __init__(self, states, actions, rewards_to_go, timesteps, seq_len=144):
+    def __init__(self, states, actions, rewards_to_go, execution_times, timesteps, seq_len=144):
         self.states = states
         self.actions = actions
         self.rewards_to_go = rewards_to_go
+        self.execution_times = execution_times
         self.timesteps = timesteps
         self.seq_len = seq_len
 
@@ -23,6 +24,12 @@ class DecisionTransformerData(Dataset):
         state = torch.tensor(self.states[idx], dtype=torch.float32)
         action = torch.tensor(self.actions[idx], dtype=torch.float32)
         reward_to_go = torch.tensor(self.rewards_to_go[idx], dtype=torch.float32)
+        execution_time = torch.tensor(self.execution_times[idx], dtype=torch.float32)
+
+        combined_action = torch.zeros(action.shape[0], 2)
+        combined_action[:, 0] = action.squeeze(-1)  # Submit decision
+        combined_action[:, 1] = execution_time.squeeze(-1)
+
         rewards = torch.clone(reward_to_go)
         rewards[:143, :] = 0
         timesteps = torch.tensor(self.timesteps[idx], dtype=torch.int32)
@@ -32,14 +39,14 @@ class DecisionTransformerData(Dataset):
         if len(state) < self.seq_len:
             pad_size = self.seq_len - len(state)
             state = torch.cat([state, torch.zeros(pad_size)])
-            action = torch.cat([action, torch.zeros(pad_size, dtype=torch.float32)])
             reward_to_go = torch.cat([reward_to_go, torch.zeros(pad_size)])
             rewards = torch.cat([rewards, torch.zeros(pad_size)])
+            combined_action = torch.cat([combined_action, torch.zeros(pad_size, 2)])
             timesteps = torch.cat([timesteps, torch.zeros(pad_size)])
 
         return {
             "states": state,
-            "actions": action,
+            "actions": combined_action,
             "rewards_to_go": reward_to_go,
             "rewards": rewards,
             "timesteps": timesteps,
@@ -69,21 +76,27 @@ def main():
         rewards_to_go = pickle.load(f).float()
         print("imported rewards_to_go.shape:", rewards_to_go.shape)
         print("imported rewards_to_go.dtype:", rewards_to_go.dtype)
+    with open(training_data_path + "execution_time_sequence.pickle", "rb") as f:
+        execution_times = pickle.load(f).float()
+        print("imported execution_times.shape:", execution_times.shape)
+        print("imported execution_times.dtype:", execution_times.dtype)
     with open(training_data_path + "timestep_sequence.pickle", "rb") as f:
         timesteps = pickle.load(f).long()
         print("imported timesteps.shape:", timesteps.shape)
         print("imported timesteps.dtype:", timesteps.dtype)
 
 
-
+    execution_max = execution_times.max().item()
+    execution_times = execution_times / execution_max
     states = states.to(device)
     actions = actions.to(device)
     rewards_to_go = rewards_to_go.to(device)
+    execution_times = execution_times.to(device)
     timesteps = timesteps.to(device)
 
     dt_config = DecisionTransformerConfig(
         state_dim=42,
-        act_dim=1,
+        act_dim=2,
         hidden_size=32,
         n_inner=32,
         n_layer=2,
@@ -96,7 +109,7 @@ def main():
     model = DecisionTransformerModel(dt_config)
     print(sum(torch.numel(p) for p in model.parameters()))
     model.to(device)
-    all_data = DecisionTransformerData(states, actions, rewards_to_go, timesteps)
+    all_data = DecisionTransformerData(states, actions, rewards_to_go, execution_times, timesteps)
     num_train_data = int(len(all_data) * 0.8)
     num_val_data = len(all_data) - num_train_data
     train_data, val_data = random_split(all_data, [num_train_data, num_val_data])
@@ -104,15 +117,17 @@ def main():
     train_data_loader = DataLoader(train_data, batch_size=256, shuffle=True)
     val_data_loader = DataLoader(val_data, batch_size=256, shuffle=True)
 
-    loss_fn = nn.MSELoss()
     # rand_loss_fn = nn.MSELoss()
 
     optimizer = optim.AdamW(model.parameters(), lr=0.001)
 
     num_epochs = 100
+    warmup = 20
     for epoch in range(num_epochs):
         model.train()
         total_loss = 0
+        total_exec_loss = 0
+        total_submit_loss = 0
         # total_rand_loss = 0
         for batch in train_data_loader:
             optimizer.zero_grad()
@@ -140,7 +155,11 @@ def main():
                 attention_mask=attn_mask,
                 return_dict=False
             )
-            loss = loss_fn(action_pred.view(-1), actions.view(-1))
+            submit_loss = nn.MSELoss()(action_pred[:, :, 0], actions[:, :, 0])
+    
+            # 2. Execution time loss - use MSE on second dimension
+            exec_time_loss = nn.SmoothL1Loss()(action_pred[:, :, 1], actions[:, :, 1])
+            loss = submit_loss + exec_time_loss if epoch > warmup else submit_loss
             # random_guesses = actions
             # random_guesses[:,-1,:] = 0.0
             # rand_loss = rand_loss_fn(random_guesses.view(-1), actions.view(-1))
@@ -148,6 +167,8 @@ def main():
             loss.backward()
             optimizer.step()
             
+            total_submit_loss += submit_loss.item()
+            total_exec_loss += exec_time_loss.item()
             total_loss += loss.item()
 
         # now compute validation loss
@@ -155,6 +176,7 @@ def main():
         total_val_loss = 0
         total_val_same = 0
         total_val_items = 0
+        total_exec_mae = 0
         with torch.no_grad():
             for batch in val_data_loader:
                 states = batch["states"].to(device)
@@ -175,21 +197,55 @@ def main():
                 )
 
                 # round each action_pred[:, -1, :] to a decision
-                val_actions_pred = action_pred[:, -1, :]
+                val_actions_pred = action_pred[:, -1, 0]
                 val_actions_pred = (val_actions_pred > 0.0).float().mul(2).add(-1)
-                val_actions = actions[:, -1, :]
+                val_actions = actions[:, -1, 0]
 
                 total_val_same += int((val_actions_pred == val_actions).sum().item())
                 total_val_items += torch.numel(val_actions_pred)
 
-                val_loss = loss_fn(action_pred.view(-1), actions.view(-1))
+                val_exec_pred = action_pred[:, -1, 1]
+                val_exec_target = actions[:, -1, 1]
+                
+                # Calculate mean absolute error for execution time
+                exec_mae = torch.abs(val_exec_pred - val_exec_target).sum().item() * execution_max
+                total_exec_mae += exec_mae
+                
+                # Calculate validation losses
+                val_submit_loss = nn.MSELoss()(action_pred[:, :, 0], actions[:, :, 0])
+                val_exec_loss = nn.SmoothL1Loss()(action_pred[:, :, 1], actions[:, :, 1])
+                val_loss = val_submit_loss + val_exec_loss if epoch > warmup else val_submit_loss
+                
                 total_val_loss += val_loss.item()
-        print(f"Epoch {epoch+1}, Loss: {total_loss: .4f}, Validation Loss: {total_val_loss}, Percent guessed right: {100*total_val_same/total_val_items: .4f}%")
+
+        print(f"Epoch {epoch+1}, "
+                f"Loss: {total_loss:.4f}, "
+                f"Submit Loss: {total_submit_loss:.4f}, "
+                f"Exec Loss: {total_exec_loss:.4f}, "
+                f"Val Loss: {total_val_loss:.4f}, "
+                f"Decision Accuracy: {100*total_val_same/total_val_items:.2f}%, "
+                f"Exec Time MAE: {total_exec_mae/total_val_items:.2f}")
         if epoch % 10 == 9:
             save_path = f"{checkpoint_folder}checkpoint_{epoch+1}.cpt"
             model.save_pretrained(save_path)
             print("Saved checkpoint")
             # torch.save({"epoch": epoch, "model_state_dict": model.state_dict(), "optimizer_state_dict": optimizer.state_dict(), "loss": total_loss}, f"")
+            metadata_path = f"{checkpoint_folder}metadata_{epoch+1}.pt"
+            torch.save({
+                "epoch": epoch,
+                "norm_factor": execution_max,
+                "optimizer_state_dict": optimizer.state_dict(),
+                "train_losses": {
+                    "total": total_loss,
+                    "submit": total_submit_loss,
+                    "exec": total_exec_loss
+                },
+                "val_metrics": {
+                    "loss": total_val_loss,
+                    "decision_accuracy": 100*total_val_same/total_val_items,
+                    "exec_mae": total_exec_mae/total_val_items
+                }
+            }, metadata_path)
 
 if __name__ == "__main__":
     main()

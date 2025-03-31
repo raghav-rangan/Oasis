@@ -368,16 +368,25 @@ class Simulator:
                         target_data = list(map(lambda x: x + [(pred_job.time_limit, pred_job.nodes, p_wait, p_finish),
                                                               (next_job.time_limit, next_job.nodes, 0, 0)],
                                                self._global_history))
-                        expected_reward = infer_func([self._scheduler.job_logs, self._scheduler.avail_nodes],
+                        inference = infer_func([self._scheduler.job_logs, self._scheduler.avail_nodes],
                                                      [target_data])
+                        if isinstance(inference, tuple):
+                            expected_reward = inference[0]
+                            pred_exec_time = inference[1]
+                        else:
+                            expected_reward = inference
+                            pred_exec_time = None
+
                         logging.info(
                             f"Simulator Time: {self._time}, Complete inference. Expected Reward: {expected_reward}")
                         self._prediction_trace.append(expected_reward)
                         if infer_lower_bound <= expected_reward <= infer_upper_bound:
+                            ac_exec_time = next_job.duration.total_seconds()
                             next_job.submit = self._time
                             self._scheduler.submit([next_job])
+                            print("appending")
                             wait_reward_pool.append((next_job, pred_job, int(p_wait), int(p_finish), expected_reward,
-                                                     self._time.strftime("%Y-%m-%d %H:%M:%S")))
+                                                     self._time.strftime("%Y-%m-%d %H:%M:%S"), None, pred_exec_time, ac_exec_time))
                             index_per_group[i] += 1
                             logging.info(
                                 "Simulator Time: {}, Successor job submission (Pred: {}, Succ: {})".format(self._time,
@@ -398,7 +407,7 @@ class Simulator:
                                            (item[0].time_limit, item[0].nodes, 0, 0)], self._global_history))
                     dual_job_id_pair = (item[1].job_id, item[0].job_id)
                     self._active_reward[dual_job_id_pair] = [
-                        (mini_batch_per_group_t, reward_collection[item[0].job_id][1]), None]
+                        (mini_batch_per_group_t, reward_collection[item[0].job_id][1], item[0].duration.total_seconds()/60), None]
                     self._active_reward[dual_job_id_pair][1] = self._time
                     if not offline:
                         expected_reward = item[4]
@@ -408,7 +417,12 @@ class Simulator:
                             f"Reward Update: Expected reward: {expected_reward}, "
                             f"Actual reward: {actual_reward}, "
                             f"Error: {expected_reward - actual_reward}")
-                        self._reward.append((dual_job_id_pair[0], dual_job_id_pair[1], expected_reward, actual_reward,
+                        if len(item) >= 9:
+                            print(item[7], item[8])
+                            self._reward.append((dual_job_id_pair[0], dual_job_id_pair[1], expected_reward, actual_reward,
+                                             reward_collection[item[0].job_id][2], item[0].backfill_time, item[5], item[7], item[8]))
+                        else:
+                            self._reward.append((dual_job_id_pair[0], dual_job_id_pair[1], expected_reward, actual_reward,
                                              reward_collection[item[0].job_id][2], item[0].backfill_time, item[5]))
                     else:
                         logging.info(

@@ -6,10 +6,12 @@ def main():
     raw_data = None
     with open(sys.argv[1], "rb") as rdf:
         raw_data = pickle.load(rdf)
-    features, rewards = raw_data
+    features, rewards, execution = raw_data
+    execution = execution.unsqueeze(1)
     rewards = rewards.unsqueeze(1)
     print("raw_features.shape:", features.shape)
     print("raw_rewards.shape:", rewards.shape)
+    print("raw_execution.shape:", execution.shape)
 
     # make the sequences of 144 tokens (state_vector[i], action=0, reward_to_go=reward)
     # the input tensors are N x 144 x 42, N x 1
@@ -32,16 +34,21 @@ def main():
     nosubmit_state = torch.zeros(num_nosubmit, 144, 42, dtype=torch.float32)
     nosubmit_actions = torch.full((num_nosubmit, 144, 1), -1, dtype=torch.int32)
     nosubmit_rewards = torch.zeros(num_nosubmit, 144, 1, dtype=torch.float32)
+    nosubmit_execution = torch.zeros(num_nosubmit, 144, 1, dtype=torch.float32)
 
     for i in range(features.shape[0]):
         if i % num_probing_points != (num_probing_points - 1):
             # we can make a pseudo-sample
             # take the max over the remaining samples in this sequence
             best_not_submit = rewards[i+1]
+            best_idx = i+1
             for delta_i in range(1, num_probing_points - (i % num_probing_points)):
-                best_not_submit = max(best_not_submit, rewards[i + delta_i])
+                if rewards[i + delta_i] > best_not_submit:
+                    best_not_submit = rewards[i + delta_i]
+                    best_idx = i + delta_i
             nosubmit_state[nosubmit_sample_counter] = features[i]
             nosubmit_rewards[nosubmit_sample_counter, :, :] = best_not_submit
+            nosubmit_execution[nosubmit_sample_counter, :, :] = execution[best_idx]
             nosubmit_sample_counter += 1
 
     print("nosubmit actions sum:", nosubmit_actions.sum())
@@ -52,6 +59,7 @@ def main():
     print("nosubmit_state.shape:", nosubmit_state.shape)
     print("nosubmit_actions.shape:", nosubmit_actions.shape)
     print("nosubmit_rewards.shape:", nosubmit_rewards.shape)
+    print("nosubmit_execution.shape:", nosubmit_execution.shape)
     print()
 
     # make the state sequence
@@ -81,6 +89,13 @@ def main():
     print("combined rewards.shape", rew_seq.shape)
     print()
 
+    # exec times 
+    exec_seq = torch.ones(1, 144, 1) * execution
+    print("execution.shape", exec_seq.shape)
+    exec_seq = torch.cat((exec_seq, nosubmit_execution))
+    print("combined execution.shape", exec_seq.shape)
+    print()
+
     times = torch.arange(144)
     time_seq = times.view(1, 144, 1).expand(state_seq.shape[0], -1, -1)
     print("timeseq.shape:", time_seq.shape)
@@ -92,6 +107,8 @@ def main():
         pickle.dump(act_seq, f)
     with open("reward_sequence.pickle", "wb") as f:
         pickle.dump(rew_seq, f)
+    with open("execution_time_sequence.pickle", "wb") as f:
+        pickle.dump(exec_seq, f)
     with open("timestep_sequence.pickle", "wb") as f:
         pickle.dump(time_seq, f)
 

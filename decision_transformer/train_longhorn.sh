@@ -1,1 +1,1 @@
-python3 dec_trans.py /mydata/Mirage/src/data/longhorn/data/ /mydata/Mirage/decision_transformer/longhorn_checkpoints/
+python3 dec_trans.py /mydata/Oasis/Oasis/src/data/longhorn/data/ /mydata/Oasis/Oasis/decision_transformer/longhorn_checkpoints/

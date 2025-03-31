@@ -1,1 +1,1 @@
-python3 dec_trans.py /mydata/Mirage/src/data/frontera/data/ /mydata/Mirage/decision_transformer/frontera_checkpoints/
+python3 dec_trans.py /mydata/Oasis/Oasis/src/data/frontera/data/ /mydata/Oasis/Oasis/decision_transformer/frontera_checkpoints/
